@@ -1,44 +1,37 @@
 import numpy as np
 
-class Tensor(object): #создаем класс Tensor, наследуем от object
+class Tensor(object): 
     _next_id = 0
     def __init__(self, data, creators = None, operation_on_creation = None, autograd=False, id=None):
         self.data = np.array(data)
         self.creators = creators
         self.autograd = autograd
         self.operation_on_creation = operation_on_creation
-        self.grad = None  # предварительное объявление поля градиента
-        # нам нужна информация о всех дочерних элементах тензора, т.е. элементах в создании которых участвовал данный тензор
-        self.children = {}  # создаем словарь
-        # если id пустой, то мы его генерируем
+        self.grad = None  
+        self.children = {} 
         if id is None:
             self.id = Tensor._next_id
             Tensor._next_id += 1
         else:
             self.id = id
-
-        # проверяем есть ли для нашего тензора создатели и если есть, то сообщаем им о себе, добавляя в словарь дочерних элементах
         if creators is not None:
             for creator in creators:
                 if self.id not in creator.children:
                     creator.children[self.id] = 1
                 else:
                     creator.children[
-                    self.id] += 1  # если мы уже сообщади о себе, то просто увеличиваем количество детей от этого id
+                    self.id] += 1 
 
     def __add__(self, other):
-
-    # если у складываемых тензоров включен автоградиент, то мы изменяем результат возвращаемый функцией. если автоградиент не включен, то информацию о создателях передавать не нужно.
         if self.autograd and other.autograd:
             return Tensor(self.data + other.data, [self, other], "+", True)
         return Tensor(self.data + other.data)
 
-    def __str__(self):# функция нужна для удобного вывода в консоль
+    def __str__(self):
         return str(self.data.__str__())
 
     def backward(self, grad=None, grad_origin=None):
         if self.autograd:
-        # если градиент пустой, то мы создаем тензор, состоящий из одних единиц с размерностью data
             if grad is None:
                 grad = Tensor(np.ones_like(self.data))
             if grad_origin is not None:
@@ -47,35 +40,33 @@ class Tensor(object): #создаем класс Tensor, наследуем от
             if self.grad is None:
                 self.grad = grad
             else:
-                self.grad += grad  # суммируем старое и новое значения градиентов
-        # теперь мы должны выполнить проверки и произвести вычисления
+                self.grad += grad  
             if self.creators is not None and (self.check_grads_from_children() or grad_origin is None):
                 if self.operation_on_creation == "+":  #
                     self.creators[0].backward(grad, grad_origin=self)
                     self.creators[1].backward(grad, grad_origin=self)
-                elif self.operation_on_creation == "-1":  # добавляем еще одно условие
-                    self.creators[0].backward(self.grad.__neg__(), self)  # делаем инверсию градиента
-                elif self.operation_on_creation == "-":  # добавляем еще одно условие
-                    self.creators[0].backward(self.grad, self)  # для уменьшаемого передаем производную со знаком +
-                    self.creators[1].backward(self.grad.__neg__(), self)  # для вычитаемого передаем производную со знаком -
-                elif self.operation_on_creation == "*":  # добавляем еще одно условие
+                elif self.operation_on_creation == "-1":  
+                    self.creators[0].backward(self.grad.__neg__(), self)  
+                elif self.operation_on_creation == "-":  
+                    self.creators[0].backward(self.grad, self)  
+                    self.creators[1].backward(self.grad.__neg__(), self)  
+                elif self.operation_on_creation == "*":  
                     self.creators[0].backward(self.grad * self.creators[1], self)
-                    self.creators[1].backward(self.grad * self.creators[0], self)  #
+                    self.creators[1].backward(self.grad * self.creators[0], self) 
                 elif self.operation_on_creation.startswith("sum_"):
-                    axis = int(self.operation_on_creation.split("_")[1])  # получаем значение оси
+                    axis = int(self.operation_on_creation.split("_")[1])  
                     self.creators[0].backward(self.grad.expand(axis, self.creators[0].data.shape[axis]), self)
                 elif "expand" in self.operation_on_creation:
-                    axis = int(self.operation_on_creation.split("_")[1])  # получаем значение оси
+                    axis = int(self.operation_on_creation.split("_")[1]) 
                     self.creators[0].backward(self.grad.sum(axis), self)
 
-    def check_grads_from_children(self):  # функция возвращает true когда все градиенты детей получены
+    def check_grads_from_children(self):  
         for id in self.children:
             if self.children[id] != 0:
                 return False
         return True
 
     def __neg__(self):
-    # При операции отрицания в функцию передается только объект, который должен стать отрицательным
         if self.autograd:
             return Tensor(self.data * -1, [self], "-1", True)
         return Tensor(self.data * -1)
@@ -90,20 +81,20 @@ class Tensor(object): #создаем класс Tensor, наследуем от
             return Tensor(self.data * other.data, [self, other], "*", True)
         return Tensor(self.data * other.data)
 
-    def sum(self, axis):  # axis - это ось, по которой будем проводить суммирование
+    def sum(self, axis):  
         if self.autograd:
-            return Tensor(self.data.sum(axis), [self], "sum_"+str(axis),True) # вызываем операцию sum из библиотеки numpy
+            return Tensor(self.data.sum(axis), [self], "sum_"+str(axis),True) 
         return Tensor(self.data.sum(axis))
 
-    def expand(self, axis, count_copies):  # функция расширения
-        transpose = list(range(0, len(self.data.shape)))  # записываем индексы элементов тензора с заданной размерностью
+    def expand(self, axis, count_copies): 
+        transpose = list(range(0, len(self.data.shape))) 
 
         transpose.insert(axis, len(self.data.shape))
-        expand_shape = list(self.data.shape) + [count_copies]  # определяем размерность будущего тензора после расширения
-        expand_data = (self.data.repeat(count_copies).reshape(expand_shape))  # повторяем элементы тензора заданное количество раз и преобразуем к рассчитанной размерности
-        expand_data = expand_data.transpose(transpose)  # в случае нулевой оси производим транспонирование в соответствии с кортежем, иначе не надо его производить.
+        expand_shape = list(self.data.shape) + [count_copies]  
+        expand_data = (self.data.repeat(count_copies).reshape(expand_shape)) 
+        expand_data = expand_data.transpose(transpose) 
         if self.autograd:
-            return Tensor(expand_data, [self], "expand_" + str(axis), True)  # вызываем операцию sum из библиотеки numpy
+            return Tensor(expand_data, [self], "expand_" + str(axis), True)  
         return Tensor(expand_data)
         return Tensor(self.data.sum(axis), [self], "sum_" + str(axis), True)
 
@@ -155,4 +146,5 @@ print('\n' + 'sum')
 s = a.sum(0)
 s.backward(Tensor([5, 10, 20]))
 print(a.grad)
+
 print(s.data, a.grad)
